@@ -1,7 +1,13 @@
 
 import sqlite3
+import os
+from pathlib import Path
 
-DATABASE = "expenses.db"
+# Store the database in Windows AppData
+app_data = Path(os.environ.get("APPDATA", Path.home())) / "FlowMoney"
+app_data.mkdir(parents=True, exist_ok=True)
+
+DATABASE = str(app_data / "expenses.db")
 
 
 def create_database():
@@ -39,9 +45,10 @@ def get_transactions():
     connection = sqlite3.connect(DATABASE)
     cursor = connection.cursor()
 
-    cursor.execute(
-        "SELECT * FROM transactions ORDER BY id DESC"
-    )
+    cursor.execute("""
+        SELECT * FROM transactions
+        ORDER BY id DESC
+    """)
 
     transactions = cursor.fetchall()
     connection.close()
