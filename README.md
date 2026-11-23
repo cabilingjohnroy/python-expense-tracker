@@ -41,6 +41,16 @@ FlowMoney is a desktop application designed to help users manage their finances,
 
    `python app.py`
 
+### Windows shortcuts
+
+These expect a virtual environment in `.venv` (`python -m venv .venv`, then install the requirements into it):
+
+| File | What it does |
+|------|--------------|
+| `run.bat` | Opens FlowMoney with your real data. |
+| `demo.bat` | Opens FlowMoney with sample data in a separate folder, so your real transactions are never touched. |
+| `build_exe.bat` | Rebuilds `dist\FlowMoney.exe` with PyInstaller. |
+
 ## Running Tests
 
 The database tests use a temporary database, so your real data is never touched:
@@ -49,7 +59,13 @@ The database tests use a temporary database, so your real data is never touched:
 
 ## Screenshots
 
-<img width="1535" height="817" alt="FLOWMONEY" src="https://github.com/user-attachments/assets/9f3d8cb5-13a6-4d78-97cb-4cbfc6f4acff" />
+**Financial report** — month navigator, income vs expenses chart, and expense breakdown (sample data):
+
+![FlowMoney financial report](docs/financial-report.png)
+
+**Overview**
+
+<img width="1535" height="817" alt="FlowMoney overview" src="https://github.com/user-attachments/assets/9f3d8cb5-13a6-4d78-97cb-4cbfc6f4acff" />
 
 
 ## Developer

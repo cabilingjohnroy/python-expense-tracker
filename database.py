@@ -3,8 +3,10 @@ import os
 from contextlib import closing, contextmanager
 from pathlib import Path
 
-# Store the database in Windows AppData
-app_data = Path(os.environ.get("APPDATA", Path.home())) / "FlowMoney"
+# Store the database in Windows AppData.
+# FLOWMONEY_DATA_DIR overrides this (used by demo.bat so demo data never mixes with real data).
+_override = os.environ.get("FLOWMONEY_DATA_DIR")
+app_data = Path(_override) if _override else Path(os.environ.get("APPDATA", Path.home())) / "FlowMoney"
 app_data.mkdir(parents=True, exist_ok=True)
 
 DATABASE = str(app_data / "expenses.db")
