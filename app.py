@@ -1,4 +1,4 @@
-"""FlowMoney 4.0 — charcoal / royal blue / tangerine expense tracker.
+"""FlowMoney 4.1 — charcoal / royal blue / tangerine expense tracker.
 
 Requires: customtkinter, and the project's existing database.py module.
 """
@@ -110,7 +110,7 @@ class FlowMoney(ctk.CTk):
         ctk.CTkLabel(tip, text="A clearer view of your\nfinancial everyday.",
                      justify="left", font=(FONT, 12),
                      text_color=MUTED).pack(anchor="w", padx=17, pady=(0, 18))
-        ctk.CTkLabel(self.sidebar, text="FLOWMONEY     /     V4.0", font=(FONT, 10),
+        ctk.CTkLabel(self.sidebar, text="FLOWMONEY     /     V4.1", font=(FONT, 10),
                      text_color=MUTED).pack(side="bottom", pady=22)
 
         self.content = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
