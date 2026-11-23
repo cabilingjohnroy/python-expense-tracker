@@ -1,6 +1,6 @@
-
 import sqlite3
 import os
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 # Store the database in Windows AppData
@@ -10,80 +10,64 @@ app_data.mkdir(parents=True, exist_ok=True)
 DATABASE = str(app_data / "expenses.db")
 
 
+@contextmanager
+def _connect():
+    """Open a connection, commit on success, roll back on error, always close."""
+    with closing(sqlite3.connect(DATABASE)) as connection:
+        with connection:  # commits, or rolls back if an exception is raised
+            yield connection
+
+
 def create_database():
-    connection = sqlite3.connect(DATABASE)
-    cursor = connection.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            type TEXT NOT NULL,
-            category TEXT NOT NULL,
-            amount REAL NOT NULL,
-            date TEXT NOT NULL
+    with _connect() as connection:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL,
+                category TEXT NOT NULL,
+                amount REAL NOT NULL,
+                date TEXT NOT NULL
+            )
+        """)
+        # Speeds up date sorting and monthly reports as the table grows.
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions (date)"
         )
-    """)
-
-    connection.commit()
-    connection.close()
 
 
-def add_transaction(type, category, amount, date):
-    connection = sqlite3.connect(DATABASE)
-    cursor = connection.cursor()
-
-    cursor.execute("""
-        INSERT INTO transactions (type, category, amount, date)
-        VALUES (?, ?, ?, ?)
-    """, (type, category, amount, date))
-
-    connection.commit()
-    connection.close()
+def add_transaction(t_type, category, amount, date):
+    if t_type not in ("Income", "Expense"):
+        raise ValueError(f"Unknown transaction type: {t_type!r}")
+    with _connect() as connection:
+        connection.execute(
+            "INSERT INTO transactions (type, category, amount, date) VALUES (?, ?, ?, ?)",
+            (t_type, category, amount, date),
+        )
 
 
-def get_transactions():
-    connection = sqlite3.connect(DATABASE)
-    cursor = connection.cursor()
-
-    cursor.execute("""
-        SELECT * FROM transactions
-        ORDER BY id DESC
-    """)
-
-    transactions = cursor.fetchall()
-    connection.close()
-
-    return transactions
+def get_transactions(limit=None):
+    """Newest first (by transaction date, then by entry order)."""
+    query = "SELECT id, type, category, amount, date FROM transactions ORDER BY date DESC, id DESC"
+    params = ()
+    if limit is not None:
+        query += " LIMIT ?"
+        params = (int(limit),)
+    with _connect() as connection:
+        return connection.execute(query, params).fetchall()
 
 
 def delete_transaction(transaction_id):
-    connection = sqlite3.connect(DATABASE)
-    cursor = connection.cursor()
-
-    cursor.execute(
-        "DELETE FROM transactions WHERE id = ?",
-        (transaction_id,)
-    )
-
-    connection.commit()
-    connection.close()
+    with _connect() as connection:
+        connection.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
 
 
 def get_totals():
-    transactions = get_transactions()
-
-    income = 0
-    expenses = 0
-
-    for transaction in transactions:
-        transaction_type = transaction[1]
-        amount = transaction[3]
-
-        if transaction_type == "Income":
-            income += amount
-        else:
-            expenses += amount
-
-    balance = income - expenses
-
-    return income, expenses, balance
+    """Return (income, expenses, balance), computed by SQLite instead of in Python."""
+    with _connect() as connection:
+        income, expenses = connection.execute("""
+            SELECT
+                COALESCE(SUM(CASE WHEN type = 'Income' THEN amount END), 0),
+                COALESCE(SUM(CASE WHEN type = 'Expense' THEN amount END), 0)
+            FROM transactions
+        """).fetchone()
+    return income, expenses, income - expenses

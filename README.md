@@ -39,6 +39,12 @@ FlowMoney is a desktop application designed to help users manage their finances,
 
    `python app.py`
 
+## Running Tests
+
+The database tests use a temporary database, so your real data is never touched:
+
+   `python -m unittest discover tests -v`
+
 ## Screenshots
 
 <img width="1535" height="817" alt="FLOWMONEY" src="https://github.com/user-attachments/assets/9f3d8cb5-13a6-4d78-97cb-4cbfc6f4acff" />

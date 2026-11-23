@@ -2,7 +2,7 @@
 
 Requires: customtkinter, and the project's existing database.py module.
 """
-from datetime import date
+from datetime import date, datetime
 from collections import defaultdict
 import csv
 from tkinter import filedialog
@@ -58,6 +58,7 @@ class FlowMoney(ctk.CTk):
         self.configure(fg_color=BG)
         self.page = "dashboard"
         self.active_dialog = None
+        self._search_job = None
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", self._on_search)
         self.filter_type = tk.StringVar(value="All")
@@ -163,9 +164,11 @@ class FlowMoney(ctk.CTk):
         ctk.CTkLabel(right, text=peso(balance), font=(FONT, 29, "bold"),
                      text_color=WHITE).pack(anchor="e", pady=(4, 0))
         if income > 0:
-            ratio = min(100, expenses / income * 100)
-            ctk.CTkLabel(right, text=f"{ratio:.0f}% of income spent",
-                         font=(FONT, 11), text_color="#D6E4FF").pack(anchor="e", pady=(2, 0))
+            ratio = expenses / income * 100
+            overspent = ratio > 100
+            ctk.CTkLabel(right, text=f"{ratio:.0f}% of income spent" + ("  ·  over budget" if overspent else ""),
+                         font=(FONT, 11, "bold" if overspent else "normal"),
+                         text_color=ORANGE if overspent else "#D6E4FF").pack(anchor="e", pady=(2, 0))
         ctk.CTkFrame(hero, height=5, fg_color=ORANGE, corner_radius=0).pack(fill="x", padx=20, pady=(0, 0))
 
     def show_dashboard(self):
@@ -180,7 +183,7 @@ class FlowMoney(ctk.CTk):
         self._card(cards, "Available balance", balance, WHITE, "◈")
         self._card(cards, "Total income", income, GREEN, "↗")
         self._card(cards, "Total expenses", expenses, ORANGE, "↘")
-        self._render_transactions(self.content, get_transactions()[:7], "Recent activity", show_all=True)
+        self._render_transactions(self.content, get_transactions(limit=7), "Recent activity", show_all=True)
 
     def show_transactions(self):
         self.page = "transactions"
@@ -197,11 +200,19 @@ class FlowMoney(ctk.CTk):
         self._update_transaction_results()
 
     def _on_search(self, *_):
+        # Debounce: wait until the user pauses typing instead of
+        # re-querying and rebuilding the whole table on every keystroke.
+        if self._search_job is not None:
+            self.after_cancel(self._search_job)
+        self._search_job = self.after(250, self._run_search)
+
+    def _run_search(self):
+        self._search_job = None
         if getattr(self, "page", None) == "transactions" and hasattr(self, "results_host") and self.results_host.winfo_exists():
             self._update_transaction_results()
 
     def _update_transaction_results(self):
-        if self.page != "transactions":
+        if self.page != "transactions" or not self.results_host.winfo_exists():
             return
         keyword = self.search_var.get().strip().lower()
         kind = self.filter_type.get()
@@ -431,7 +442,7 @@ class FlowMoney(ctk.CTk):
         return modal, (box, close)
 
     def add_dialog(self):
-        modal, parts = self._dialog_base("New transaction", "Keep your spending organized, one entry at a time.", 470, 515)
+        modal, parts = self._dialog_base("New transaction", "Keep your spending organized, one entry at a time.", 470, 600)
         if modal is None:
             return
         body, close = parts
@@ -452,7 +463,12 @@ class FlowMoney(ctk.CTk):
 
         field_label("AMOUNT (PHP)")
         amount = ctk.CTkEntry(form, placeholder_text="0.00", fg_color=FIELD, border_color=BORDER, height=41)
-        amount.pack(fill="x", pady=(0, 8))
+        amount.pack(fill="x", pady=(0, 16))
+
+        field_label("DATE (YYYY-MM-DD)")
+        when = ctk.CTkEntry(form, fg_color=FIELD, border_color=BORDER, height=41)
+        when.insert(0, date.today().isoformat())
+        when.pack(fill="x", pady=(0, 8))
 
         error_var = tk.StringVar(value="")
         ctk.CTkLabel(form, textvariable=error_var, text_color=RED, font=(FONT, 11), height=28).pack(anchor="w")
@@ -475,7 +491,15 @@ class FlowMoney(ctk.CTk):
                 amount.focus_set()
                 return "break"
             try:
-                add_transaction(kind.get(), cat, float(value), date.today().isoformat())
+                t_date = datetime.strptime(when.get().strip(), "%Y-%m-%d").date()
+                if t_date > date.today():
+                    raise ValueError
+            except ValueError:
+                error_var.set("Enter a valid date (YYYY-MM-DD), not in the future.")
+                when.focus_set()
+                return "break"
+            try:
+                add_transaction(kind.get(), cat, float(value), t_date.isoformat())
             except Exception as err:
                 error_var.set(f"Could not save: {err}")
                 return "break"
