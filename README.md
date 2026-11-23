@@ -8,13 +8,13 @@ FlowMoney is a desktop application designed to help users manage their finances,
 
 - **Financial Dashboard** — View your total income, expenses, and available balance.
 - **Transaction Management** — Add, view, search, and delete transactions.
-- **Financial Reports** — Browse month by month (◀ ▶) or view all-time summaries.
+- **Financial Reports** — Browse month by month with previous/next arrows, or view all-time summaries.
 - **Income vs Expenses Chart** — Six-month bar chart with hover totals.
 - **Smart Categories** — Pick from a dropdown or type a new one; "food" and "Food" stay one category.
 - **Expense Breakdown** — Track spending by category.
 - **CSV Export** — Export financial reports for use in Excel.
 - **Modern Interface** — Charcoal black, royal blue, and tangerine orange design.
-- **Local Database** — Transactions are stored securely on your device using SQLite.
+- **Local Database** — Transactions are stored locally on your device using SQLite.
 
 ## Technologies Used
 
