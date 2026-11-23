@@ -56,6 +56,17 @@ def get_transactions(limit=None):
         return connection.execute(query, params).fetchall()
 
 
+def get_categories():
+    """Distinct categories the user has already used, most used first."""
+    with _connect() as connection:
+        rows = connection.execute("""
+            SELECT category FROM transactions
+            GROUP BY category
+            ORDER BY COUNT(*) DESC, category
+        """).fetchall()
+    return [row[0] for row in rows]
+
+
 def delete_transaction(transaction_id):
     with _connect() as connection:
         connection.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))

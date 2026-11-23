@@ -51,6 +51,12 @@ class DatabaseTests(unittest.TestCase):
         database.delete_transaction(tid)
         self.assertEqual(database.get_transactions(), [])
 
+    def test_categories_most_used_first(self):
+        database.add_transaction("Expense", "Transport", 5, "2026-11-01")
+        database.add_transaction("Expense", "Food", 5, "2026-11-01")
+        database.add_transaction("Expense", "Food", 5, "2026-11-02")
+        self.assertEqual(database.get_categories(), ["Food", "Transport"])
+
     def test_rejects_unknown_type(self):
         with self.assertRaises(ValueError):
             database.add_transaction("Refund", "Food", 5, "2026-11-01")

@@ -17,6 +17,15 @@ from database import (
     get_transactions,
     delete_transaction,
     get_totals,
+    get_categories,
+)
+from reports import (
+    category_choices,
+    month_label,
+    monthly_totals,
+    normalize_category,
+    records_in_month,
+    shift_month,
 )
 
 ctk.set_appearance_mode("dark")
@@ -62,6 +71,9 @@ class FlowMoney(ctk.CTk):
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", self._on_search)
         self.filter_type = tk.StringVar(value="All")
+        # Report state lives here so it's remembered when you switch pages.
+        self.report_mode = tk.StringVar(value="Monthly")
+        self.report_month = date.today().replace(day=1)
         self._build_shell()
         self.show_dashboard()
 
@@ -245,7 +257,12 @@ class FlowMoney(ctk.CTk):
             ctk.CTkLabel(table, text=text, anchor="w", font=(FONT, 10, "bold"), text_color=MUTED).grid(row=0, column=col, sticky="ew", padx=10, pady=(8, 14))
 
         if not records:
-            ctk.CTkLabel(table, text="No transactions yet. Start with + New transaction.", font=(FONT, 13), text_color=MUTED).grid(row=1, column=0, columnspan=5, pady=46)
+            searching = self.page == "transactions" and self.search_var.get().strip()
+            message = "No transactions match your search." if searching else "No transactions yet."
+            ctk.CTkLabel(table, text=message, font=(FONT, 14, "bold"), text_color=WHITE).grid(row=1, column=0, columnspan=5, pady=(40, 12))
+            if not searching:
+                ctk.CTkButton(table, text="+  Add your first transaction", command=self.add_dialog, height=38,
+                              fg_color=ACCENT, hover_color=ACCENT_HOVER, corner_radius=10).grid(row=2, column=0, columnspan=5, pady=(0, 40))
             return
 
         for i, (tid, kind, category, amount, when) in enumerate(records, start=1):
@@ -273,77 +290,151 @@ class FlowMoney(ctk.CTk):
         tools = ctk.CTkFrame(self.content, fg_color="transparent")
         tools.pack(fill="x", padx=32, pady=(0, 14))
 
-        ctk.CTkLabel(tools, text="PERIOD", font=(FONT, 11, "bold"), text_color=MUTED).pack(side="left", padx=(0, 9))
-        self.report_period = ctk.StringVar(value="This month")
-        ctk.CTkOptionMenu(
-            tools, variable=self.report_period, values=["This month", "All time", "Choose month"],
-            width=150, height=40, fg_color=PANEL_2, button_color=PANEL_2,
-            button_hover_color=BORDER, command=lambda _: self._refresh_report(),
-        ).pack(side="left", padx=(0, 12))
+        ctk.CTkSegmentedButton(
+            tools, values=["Monthly", "All time"], variable=self.report_mode,
+            selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
+            unselected_color=PANEL_2, unselected_hover_color=BORDER,
+            height=40, font=(FONT, 12, "bold"),
+            command=lambda _: self._refresh_report(),
+        ).pack(side="left")
 
-        self.report_month = ctk.CTkEntry(
-            tools, width=120, height=40, fg_color=FIELD, border_color=BORDER,
-            placeholder_text="YYYY-MM",
-        )
-        self.report_month.insert(0, date.today().strftime("%Y-%m"))
-        self.report_month.pack(side="left")
-        self.report_month.bind("<Return>", lambda event: (self._refresh_report(), "break")[1])
+        # Month navigator: ◀ November 2026 ▶  (replaces typing YYYY-MM by hand)
+        nav = ctk.CTkFrame(tools, fg_color=PANEL_2, corner_radius=10)
+        nav.pack(side="left", padx=(12, 0))
+        self.prev_month_btn = ctk.CTkButton(
+            nav, text="◀", width=38, height=40, fg_color="transparent",
+            hover_color=BORDER, command=lambda: self._change_month(-1))
+        self.prev_month_btn.pack(side="left")
+        self.month_title = ctk.CTkLabel(nav, text="", width=150, font=(FONT, 13, "bold"))
+        self.month_title.pack(side="left")
+        self.next_month_btn = ctk.CTkButton(
+            nav, text="▶", width=38, height=40, fg_color="transparent",
+            hover_color=BORDER, command=lambda: self._change_month(1))
+        self.next_month_btn.pack(side="left")
 
-        ctk.CTkButton(
-            tools, text="View report", width=110, height=40,
-            fg_color=PANEL_2, hover_color=BORDER, command=self._refresh_report,
-        ).pack(side="left", padx=(9, 0))
         ctk.CTkButton(
             tools, text="Export CSV  ↗", width=125, height=40,
             fg_color=ACCENT, hover_color=ACCENT_HOVER, command=self.export_report,
         ).pack(side="right")
 
-        self.report_message = ctk.CTkLabel(tools, text="", text_color=RED, font=(FONT, 11))
+        self.report_message = ctk.CTkLabel(tools, text="", text_color=GREEN, font=(FONT, 11))
         self.report_message.pack(side="left", padx=(12, 0))
 
         self.report_host = ctk.CTkScrollableFrame(self.content, fg_color="transparent")
         self.report_host.pack(fill="both", expand=True, padx=26, pady=(0, 20))
         self._refresh_report()
 
-    def _report_records(self):
-        """Return (records, period_label), or raise ValueError for a bad month."""
-        choice = self.report_period.get()
-        records = get_transactions()
-        if choice == "All time":
+    def _change_month(self, delta):
+        target = shift_month(self.report_month, delta)
+        if target > shift_month(date.today().replace(day=1), 0):
+            return  # no future months
+        self.report_month = target
+        self._refresh_report()
+
+    def _report_records(self, all_records=None):
+        """Return (records, period_label) for the selected period."""
+        records = get_transactions() if all_records is None else all_records
+        if self.report_mode.get() == "All time":
             return records, "All time"
-        if choice == "This month":
-            month = date.today().strftime("%Y-%m")
-        else:
-            month = self.report_month.get().strip()
-            if len(month) != 7 or month[4] != "-" or not month[:4].isdigit() or not month[5:].isdigit() or not (1 <= int(month[5:]) <= 12):
-                raise ValueError("Enter a valid month as YYYY-MM.")
-        return [r for r in records if str(r[4]).startswith(month + "-")], month
+        return records_in_month(records, self.report_month), month_label(self.report_month)
 
     def _refresh_report(self):
-        if self.page != "reports":
+        if self.page != "reports" or not self.report_host.winfo_exists():
             return
-        try:
-            records, period = self._report_records()
-        except ValueError as err:
-            self.report_message.configure(text=str(err), text_color=RED)
-            return
+        monthly = self.report_mode.get() == "Monthly"
+        this_month = date.today().replace(day=1)
+
+        # Month navigator only applies to the Monthly view.
+        self.month_title.configure(text=month_label(self.report_month),
+                                   text_color=WHITE if monthly else MUTED)
+        self.prev_month_btn.configure(state="normal" if monthly else "disabled")
+        self.next_month_btn.configure(
+            state="normal" if monthly and self.report_month < this_month else "disabled")
         self.report_message.configure(text="")
-        self.displayed_report_records = records
-        self.displayed_report_period = period
+
+        all_records = get_transactions()
+        records, period = self._report_records(all_records)
 
         for widget in self.report_host.winfo_children():
             widget.destroy()
 
         income = sum(float(r[3]) for r in records if r[1] == "Income")
         expense = sum(float(r[3]) for r in records if r[1] == "Expense")
-        net = income - expense
         cards = ctk.CTkFrame(self.report_host, fg_color="transparent")
         cards.pack(fill="x", pady=(2, 20))
         self._card(cards, "Income", income, GREEN, "↗")
         self._card(cards, "Expenses", expense, RED, "↘")
-        self._card(cards, "Net cash flow", net, WHITE, "◈")
+        self._card(cards, "Net cash flow", income - expense, WHITE, "◈")
 
-        panel = ctk.CTkFrame(self.report_host, fg_color=PANEL, border_width=1, border_color=BORDER, corner_radius=16)
+        chart_end = self.report_month if monthly else this_month
+        self._render_chart(self.report_host, monthly_totals(all_records, chart_end, 6),
+                           highlight=self.report_month if monthly else None)
+        self._render_breakdown(self.report_host, records, period, expense)
+
+    def _render_chart(self, parent, data, highlight=None):
+        panel = ctk.CTkFrame(parent, fg_color=PANEL, border_width=1, border_color=BORDER, corner_radius=16)
+        panel.pack(fill="x", padx=6, pady=(0, 14))
+        header = ctk.CTkFrame(panel, fg_color="transparent")
+        header.pack(fill="x", padx=22, pady=(19, 4))
+        ctk.CTkLabel(header, text="Income vs expenses", font=(FONT, 18, "bold"), text_color=WHITE).pack(side="left")
+        ctk.CTkLabel(header, text="●  Expenses", font=(FONT, 11, "bold"), text_color=ORANGE).pack(side="right")
+        ctk.CTkLabel(header, text="●  Income", font=(FONT, 11, "bold"), text_color=GREEN).pack(side="right", padx=(0, 16))
+
+        hint = "Hover over a month to see its totals."
+        info = ctk.CTkLabel(panel, text=hint, font=(FONT, 11), text_color=MUTED)
+        info.pack(anchor="w", padx=22)
+
+        canvas = tk.Canvas(panel, height=210, bg=PANEL, highlightthickness=0)
+        canvas.pack(fill="x", padx=22, pady=(4, 18))
+
+        def show_info(month, inc, exp):
+            info.configure(text=f"{month_label(month)}   ·   Income {peso(inc)}   ·   Expenses {peso(exp)}",
+                           text_color=WHITE)
+
+        def draw(_event=None):
+            canvas.delete("all")
+            width, height = canvas.winfo_width(), canvas.winfo_height()
+            if width < 60:
+                return
+            top, bottom, side = 24, 30, 6
+            baseline = height - bottom
+            plot_h = baseline - top
+            peak = max([max(inc, exp) for _, inc, exp in data] + [0])
+            slot = (width - 2 * side) / len(data)
+            bar_w = min(28, slot * 0.28)
+
+            for i, (month, inc, exp) in enumerate(data):
+                tag = f"month{i}"
+                x0 = side + slot * i
+                cx = x0 + slot / 2
+                selected = month == highlight
+                # Background of each month column; also catches the mouse hover.
+                canvas.create_rectangle(x0 + 4, top - 8, x0 + slot - 4, baseline,
+                                        fill=PANEL_2 if selected else PANEL, outline="", tags=tag)
+                for value, color, offset in ((inc, GREEN, -1), (exp, ORANGE, 1)):
+                    if peak and value > 0:
+                        bar_h = max(3, value / peak * plot_h)
+                        x = cx + offset * (bar_w / 2 + 2)
+                        canvas.create_rectangle(x - bar_w / 2, baseline - bar_h, x + bar_w / 2, baseline,
+                                                fill=color, outline="", tags=tag)
+                canvas.create_text(cx, baseline + 15, text=month.strftime("%b"),
+                                   fill=WHITE if selected else MUTED,
+                                   font=(FONT, 10, "bold" if selected else "normal"), tags=tag)
+                canvas.tag_bind(tag, "<Enter>", lambda _e, m=month, a=inc, b=exp: show_info(m, a, b))
+                canvas.tag_bind(tag, "<Leave>", lambda _e: info.configure(text=hint, text_color=MUTED))
+
+            canvas.create_line(side, baseline, width - side, baseline, fill=BORDER)
+            if peak:
+                canvas.create_text(side, 4, anchor="nw", text=f"Highest: {peso(peak)}",
+                                   fill=MUTED, font=(FONT, 9))
+            else:
+                canvas.create_text(width / 2, top + plot_h / 2, text="No transactions in these months yet.",
+                                   fill=MUTED, font=(FONT, 11))
+
+        canvas.bind("<Configure>", draw)
+
+    def _render_breakdown(self, parent, records, period, expense):
+        panel = ctk.CTkFrame(parent, fg_color=PANEL, border_width=1, border_color=BORDER, corner_radius=16)
         panel.pack(fill="both", expand=True, padx=6, pady=(0, 14))
         header = ctk.CTkFrame(panel, fg_color="transparent")
         header.pack(fill="x", padx=22, pady=(19, 10))
@@ -355,27 +446,32 @@ class FlowMoney(ctk.CTk):
             if kind == "Expense":
                 categories[category] += float(amount)
         categories = sorted(categories.items(), key=lambda row: row[1], reverse=True)
+
         if not categories:
-            ctk.CTkLabel(panel, text="No expenses for this period yet.", text_color=MUTED, font=(FONT, 13)).pack(pady=36)
-        else:
-            for name, amount in categories:
-                line = ctk.CTkFrame(panel, fg_color="transparent")
-                line.pack(fill="x", padx=24, pady=(8, 13))
-                ctk.CTkLabel(line, text=name, font=(FONT, 12, "bold"), text_color=WHITE, anchor="w").pack(side="left")
-                ctk.CTkLabel(line, text=f"{peso(amount)}  ·  {amount / expense * 100:.1f}%", font=(FONT, 12), text_color=MUTED).pack(side="right")
-                progress = ctk.CTkProgressBar(panel, height=9, corner_radius=6, progress_color=ORANGE, fg_color=FIELD)
-                progress.pack(fill="x", padx=24, pady=(0, 10))
-                progress.set(amount / expense if expense else 0)
+            empty = ctk.CTkFrame(panel, fg_color="transparent")
+            empty.pack(pady=(18, 30))
+            ctk.CTkLabel(empty, text="No expenses for this period yet.", font=(FONT, 14, "bold"),
+                         text_color=WHITE).pack()
+            ctk.CTkLabel(empty, text="Add one, or use ◀ ▶ to look at another month.",
+                         font=(FONT, 12), text_color=MUTED).pack(pady=(4, 14))
+            ctk.CTkButton(empty, text="+  Add transaction", command=self.add_dialog, height=38,
+                          fg_color=ACCENT, hover_color=ACCENT_HOVER, corner_radius=10).pack()
+            return
+
+        for name, amount in categories:
+            line = ctk.CTkFrame(panel, fg_color="transparent")
+            line.pack(fill="x", padx=24, pady=(8, 6))
+            ctk.CTkLabel(line, text=name, font=(FONT, 12, "bold"), text_color=WHITE, anchor="w").pack(side="left")
+            ctk.CTkLabel(line, text=f"{peso(amount)}  ·  {amount / expense * 100:.1f}%", font=(FONT, 12), text_color=MUTED).pack(side="right")
+            progress = ctk.CTkProgressBar(panel, height=9, corner_radius=6, progress_color=ORANGE, fg_color=FIELD)
+            progress.pack(fill="x", padx=24, pady=(0, 10))
+            progress.set(amount / expense if expense else 0)
         ctk.CTkLabel(panel, text="The report uses your saved transactions. Income and expenses are totalled separately.",
                      font=(FONT, 11), text_color=MUTED).pack(anchor="w", padx=24, pady=(12, 18))
 
     def export_report(self):
-        try:
-            records, period = self._report_records()
-        except ValueError as err:
-            self.report_message.configure(text=str(err), text_color=RED)
-            return
-        suggested = "financial_report_" + period.replace(" ", "_").replace("-", "_") + ".csv"
+        records, period = self._report_records()
+        suggested = "financial_report_" + period.replace(" ", "_") + ".csv"
         filename = filedialog.asksaveasfilename(
             parent=self, title="Export financial report", defaultextension=".csv",
             initialfile=suggested, filetypes=[("CSV files", "*.csv")]
@@ -457,9 +553,16 @@ class FlowMoney(ctk.CTk):
         kind.pack(fill="x", pady=(0, 16))
         kind.set("Expense")
 
-        field_label("CATEGORY")
-        category = ctk.CTkEntry(form, placeholder_text="e.g. Food, Allowance, Transport", fg_color=FIELD, border_color=BORDER, height=41)
+        field_label("CATEGORY  ·  pick one or type a new one")
+        existing = get_categories()
+        category = ctk.CTkComboBox(
+            form, values=category_choices(existing), fg_color=FIELD, border_color=BORDER,
+            button_color=PANEL_2, button_hover_color=BORDER, dropdown_fg_color=PANEL,
+            dropdown_hover_color=PANEL_2, height=41)
+        category.set("")
         category.pack(fill="x", pady=(0, 16))
+        # CTkComboBox is a frame around a text entry; focus the entry so typing works.
+        category_input = getattr(category, "_entry", category)
 
         field_label("AMOUNT (PHP)")
         amount = ctk.CTkEntry(form, placeholder_text="0.00", fg_color=FIELD, border_color=BORDER, height=41)
@@ -477,10 +580,10 @@ class FlowMoney(ctk.CTk):
         controls.pack(fill="x", padx=26, pady=(8, 0))
 
         def save(event=None):
-            cat = category.get().strip()
+            cat = normalize_category(category.get(), category_choices(existing))
             if not cat:
-                error_var.set("Please enter a category.")
-                category.focus_set()
+                error_var.set("Please pick or type a category.")
+                category_input.focus_set()
                 return "break"
             try:
                 value = Decimal(amount.get().strip())
@@ -511,7 +614,7 @@ class FlowMoney(ctk.CTk):
         ctk.CTkButton(controls, text="Save transaction   ↵", height=42, fg_color=ACCENT, hover_color=ACCENT_HOVER, command=save).pack(side="right", fill="x", expand=True, padx=(12, 0))
         # Only Enter and Escape are keyboard shortcuts.
         modal.bind("<Return>", save)
-        modal.after(120, lambda: category.focus_set() if modal.winfo_exists() else None)
+        modal.after(120, lambda: category_input.focus_set() if modal.winfo_exists() else None)
 
     def confirm_delete(self, transaction_id):
         modal, parts = self._dialog_base("Delete transaction?", "This entry will be permanently removed.\nThis action cannot be undone.", 450, 270)
